@@ -1,0 +1,14 @@
+from flask import Blueprint
+from flask_restplus import Api
+
+from apis.movies import api as movie_api
+
+blueprint = Blueprint("api", __name__, url_prefix="/api/v1")
+api = Api(
+    blueprint,
+    title="Vote For Movie API",
+    version="0.1.0",
+    description="A vote-for-movie API."
+)
+
+api.add_namespace(movie_api)
