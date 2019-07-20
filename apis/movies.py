@@ -18,7 +18,8 @@ class MovieDAO:
 
     def create(self, data):
         movie = data
-        movie["id"] = self.counter = self.counter + 1
+        self.counter += 1
+        movie["id"] = str(self.counter)
         self.movies.append(movie)
         return movie
 
