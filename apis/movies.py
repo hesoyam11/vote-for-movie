@@ -1,4 +1,5 @@
 from bson import ObjectId
+from flask import request
 from flask_restplus import Namespace, Resource, fields
 from pymongo import MongoClient
 
@@ -30,7 +31,14 @@ movie_collection = MongoClient().vote_for_movie.movies
 class MovieList(Resource):
     @api.marshal_list_with(movie_fields)
     def get(self):
-        return list(movie_collection.find())
+        query_object = {}
+        genre = request.args.get("genre", None)
+        if genre:
+            query_object["genres"] = {"$all": [genre]}
+        actor = request.args.get("actor", None)
+        if actor:
+            query_object["actors"] = {"$all": [actor]}
+        return list(movie_collection.find(query_object))
 
 
 def get_movie_or_404(movie_id):
