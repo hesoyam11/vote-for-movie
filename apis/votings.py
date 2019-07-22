@@ -1,6 +1,9 @@
-from datetime import datetime
+from datetime import datetime, timezone
 
+import dateutil.parser
+from bson.objectid import ObjectId
 from flask_restplus import Namespace, Resource, fields
+from pymongo import MongoClient
 
 api = Namespace("votings", description="Votings related operations")
 
@@ -11,79 +14,42 @@ choice_fields = api.model("Choice", {
 })
 
 voting_fields = api.model("Voting", {
-    "id": fields.String(readonly=True),
+    "id": fields.String(readonly=True, attribute="_id"),
     "choices": fields.List(fields.Nested(choice_fields)),
     "currentVotes": fields.Integer(readonly=True),
-    "maxVotes": fields.Integer,
+    "maxVotes": fields.Integer(min=1),
     "endDateTime": fields.DateTime(dt_format="iso8601")
 })
 
 CHOICE_ACTION_TYPES = ("vote",)
 
 choice_action_fields = api.model("Choice Action", {
-    "type": fields.String(required=True)
+    "type": fields.String(required=True, default="vote", example="vote")
 })
 
-
-class VotingDAO:
-    def __init__(self):
-        self.counter = 0
-        self.votings = []
-
-    def create(self, data):
-        voting = data
-
-        self.counter += 1
-        voting["id"] = str(self.counter)
-
-        choice_id_counter = 0
-        for choice in voting["choices"]:
-            choice["id"] = choice_id_counter
-            choice_id_counter += 1
-            choice["votes"] = 0
-
-        self.votings.append(voting)
-        return voting
-
-    def get(self, voting_id):
-        for voting in self.votings:
-            if voting["id"] == voting_id:
-                return voting
-        return None
-
-
-voting_dao = VotingDAO()
-voting_dao.create({
-    "choices": [
-        {
-            "title": "Ice Age 2",
-            "votes": 2
-        },
-        {
-            "title": "Terminator",
-            "votes": 5
-        }
-    ],
-    "currentVotes": 7,
-    "maxVotes": 10,
-    "endDateTime": None
-})
+voting_collection = MongoClient().vote_for_movie.votings
 
 
 @api.route("/")
 class VotingList(Resource):
-    @api.marshal_list_with(voting_fields)
-    def get(self):
-        return voting_dao.votings
-
     @api.expect(voting_fields)
     @api.marshal_with(voting_fields, code=201)
     def post(self):
-        return voting_dao.create(api.payload), 201
+        if "id" in api.payload:
+            del api.payload["id"]
+        choice_id_counter = 0
+        for choice in api.payload["choices"]:
+            choice["id"] = choice_id_counter
+            choice_id_counter += 1
+            choice["votes"] = 0
+        api.payload["currentVotes"] = 0
+        result = voting_collection.insert_one(api.payload)
+        voting = voting_collection.find_one({"_id": result.inserted_id})
+        return voting, 201
 
 
 def get_voting_or_404(voting_id):
-    voting = voting_dao.get(voting_id)
+    voting = voting_collection.find_one({"_id": ObjectId(voting_id)})
     if not voting:
         api.abort(404, f"Voting {voting_id} not found.")
     return voting
@@ -99,21 +65,23 @@ class Voting(Resource):
 @api.route("/<string:voting_id>/choices/<int:choice_id>/actions/")
 class ChoiceActionList(Resource):
     @api.expect(choice_action_fields)
-    @api.marshal_with(choice_fields, code=201)
     def post(self, voting_id, choice_id):
         action_type = api.payload["type"]
 
         if action_type not in CHOICE_ACTION_TYPES:
-            api.abort(400, f"Action type not supported.")
+            api.abort(400, "Action type not supported.")
 
         voting = get_voting_or_404(voting_id)
 
         end_datetime = voting.get("endDateTime", None)
         max_votes = voting.get("maxVotes", None)
 
-        if end_datetime and end_datetime >= datetime.now() or \
+        end_datetime = dateutil.parser.parse(end_datetime) \
+            if end_datetime else None
+
+        if end_datetime and end_datetime >= datetime.now(timezone.utc) or \
                 max_votes and voting["currentVotes"] >= max_votes:
-            api.abort(403, f"The voting is closed!")
+            api.abort(403, "The voting is closed!")
 
         selected_choice = None
         for choice in voting["choices"]:
@@ -127,4 +95,12 @@ class ChoiceActionList(Resource):
             selected_choice["votes"] += 1
             voting["currentVotes"] += 1
 
-        return selected_choice, 201
+        result = voting_collection.replace_one(
+            {"_id": ObjectId(voting_id)},
+            voting
+        )
+
+        if result.modified_count != 1:
+            api.abort(500, "Database error.")
+
+        return {"message": "Action is performed."}, 201
