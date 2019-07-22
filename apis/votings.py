@@ -7,7 +7,7 @@ api = Namespace("votings", description="Votings related operations")
 choice_fields = api.model("Choice", {
     "id": fields.Integer(readonly=True),
     "title": fields.String(required=True),
-    "votes": fields.Integer(readonly=True, default=0)
+    "votes": fields.Integer(readonly=True)
 })
 
 voting_fields = api.model("Voting", {
@@ -40,6 +40,7 @@ class VotingDAO:
         for choice in voting["choices"]:
             choice["id"] = choice_id_counter
             choice_id_counter += 1
+            choice["votes"] = 0
 
         self.votings.append(voting)
         return voting

@@ -1,54 +1,30 @@
 from flask_restplus import Namespace, Resource, fields
+from pymongo import MongoClient
 
 api = Namespace("movies", description="Movies related operations")
 
 movie_fields = api.model("Movie", {
-    "id": fields.String(readOnly=True),
+    "id": fields.String(readOnly=True, attribute="_id"),
     "title": fields.String(required=True),
     "year": fields.Integer(),
     "genres": fields.List(fields.String(), required=True),
     "actors": fields.List(fields.String(), required=True)
 })
 
-
-class MovieDAO:
-    def __init__(self):
-        self.counter = 0
-        self.movies = []
-
-    def create(self, data):
-        movie = data
-        self.counter += 1
-        movie["id"] = str(self.counter)
-        self.movies.append(movie)
-        return movie
-
-
-movie_dao = MovieDAO()
-movie_dao.create({
-    "title": "Terminator", "year": 1984,
-    "genres": ["Action", "Sci-Fi", "Fantasy"],
-    "actors": ["Schwarzenegger"]
-})
-movie_dao.create({
-    "title": "Forrest Gump", "year": 1994,
-    "genres": ["Drama", "Romance"],
-    "actors": ["Hanks"]
-})
-movie_dao.create({
-    "title": "Harry Potter and the Sorcerer's Stone",
-    "genres": ["Adventure", "Family", "Fantasy"],
-    "actors": ["Radcliffe", "Watson"]
-})
+movie_collection = MongoClient().vote_for_movie.movies
 
 
 @api.route("/")
 class MovieList(Resource):
     @api.marshal_list_with(movie_fields)
     def get(self):
-        return movie_dao.movies
+        return list(movie_collection.find())
 
     @api.expect(movie_fields)
     @api.marshal_with(movie_fields, code=201)
     def post(self):
-        return movie_dao.create(api.payload), 201
+        if "id" in api.payload:
+            del api.payload["id"]
+        result = movie_collection.insert_one(api.payload)
+        movie = movie_collection.find_one({"_id": result.inserted_id})
+        return movie, 201
