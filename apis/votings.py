@@ -55,14 +55,14 @@ def get_voting_or_404(voting_id):
     return voting
 
 
-@api.route("/<string:voting_id>")
+@api.route("/<voting_id>")
 class Voting(Resource):
     @api.marshal_with(voting_fields)
     def get(self, voting_id):
         return get_voting_or_404(voting_id)
 
 
-@api.route("/<string:voting_id>/choices/<int:choice_id>/actions/")
+@api.route("/<voting_id>/choices/<int:choice_id>/actions/")
 class ChoiceActionList(Resource):
     @api.expect(choice_action_fields)
     def post(self, voting_id, choice_id):
