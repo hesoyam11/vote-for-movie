@@ -32,12 +32,15 @@ class MovieList(Resource):
     @api.marshal_list_with(movie_fields)
     def get(self):
         query_object = {}
-        genre = request.args.get("genre", None)
+
+        genre = request.args.get("genre")
         if genre:
             query_object["genres"] = {"$all": [genre]}
-        actor = request.args.get("actor", None)
+
+        actor = request.args.get("actor")
         if actor:
             query_object["actors"] = {"$all": [actor]}
+
         return list(movie_collection.find(query_object))
 
 
@@ -46,6 +49,13 @@ def get_movie_or_404(movie_id):
     if not movie:
         api.abort(404, f"Movie {movie_id} not found.")
     return movie
+
+
+@api.route("/<movie_id>")
+class MovieDetail(Resource):
+    @api.marshal_with(movie_fields)
+    def get(self, movie_id):
+        return get_movie_or_404(movie_id)
 
 
 @api.route("/<movie_id>/actions/")
@@ -59,7 +69,7 @@ class MovieActionList(Resource):
 
         movie = get_movie_or_404(movie_id)
 
-        movie["sumOfMarks"] += api.payload["data"]["mark"]
+        movie["sumOfMarks"] += movie_action["data"]["mark"]
         movie["numberOfMarks"] += 1
 
         movie_collection.replace_one(
