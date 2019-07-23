@@ -1,7 +1,7 @@
-from bson import ObjectId
 from flask import request
 from flask_restplus import Namespace, Resource, fields
-from pymongo import MongoClient
+
+from .services import MovieService
 
 api = Namespace("movies", description="Movies related operations")
 
@@ -24,28 +24,23 @@ movie_action_fields = api.model("Movie Action", {
     "data": fields.Nested(mark_data_fields, required=True)
 })
 
-movie_collection = MongoClient().vote_for_movie.movies
+movie_service = MovieService()
 
 
 @api.route("/")
 class MovieList(Resource):
     @api.marshal_list_with(movie_fields)
     def get(self):
-        query_object = {}
+        movies = movie_service.get_all(
+            request.args.get("genre"),
+            request.args.get("actor")
+        )
 
-        genre = request.args.get("genre")
-        if genre:
-            query_object["genres"] = {"$all": [genre]}
-
-        actor = request.args.get("actor")
-        if actor:
-            query_object["actors"] = {"$all": [actor]}
-
-        return list(movie_collection.find(query_object))
+        return movies
 
 
 def get_movie_or_404(movie_id):
-    movie = movie_collection.find_one({"_id": ObjectId(movie_id)})
+    movie = movie_service.get(movie_id)
     if not movie:
         api.abort(404, f"Movie {movie_id} not found.")
     return movie
@@ -67,14 +62,11 @@ class MovieActionList(Resource):
         if movie_action["type"] != "rate":
             api.abort(400, "Action type not supported.")
 
-        movie = get_movie_or_404(movie_id)
-
-        movie["sumOfMarks"] += movie_action["data"]["mark"]
-        movie["numberOfMarks"] += 1
-
-        movie_collection.replace_one(
-            {"_id": ObjectId(movie_id)},
-            movie
+        is_found = movie_service.find_and_rate(
+            movie_id, movie_action["data"]["mark"]
         )
+
+        if not is_found:
+            api.abort(404, f"Movie {movie_id} not found.")
 
         return {"message": "Action performed."}, 201
