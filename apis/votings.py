@@ -21,10 +21,10 @@ voting_fields = api.model("Voting", {
     "endDateTime": fields.DateTime(dt_format="iso8601")
 })
 
-CHOICE_ACTION_TYPES = ("vote",)
+CHOICE_ACTION_TYPES = ("vote", "cancelVote")
 
 choice_action_fields = api.model("Choice Action", {
-    "type": fields.String(required=True, default="vote", example="vote")
+    "type": fields.String(required=True, example="vote")
 })
 
 voting_collection = MongoClient().vote_for_movie.votings
@@ -35,28 +35,35 @@ class VotingList(Resource):
     @api.expect(voting_fields)
     @api.marshal_with(voting_fields, code=201)
     def post(self):
-        if "id" in api.payload:
+        voting = api.payload
+
+        if "id" in voting:
             del api.payload["id"]
+
         choice_id_counter = 0
-        for choice in api.payload["choices"]:
+        for choice in voting["choices"]:
             choice["id"] = choice_id_counter
             choice_id_counter += 1
             choice["votes"] = 0
-        api.payload["currentVotes"] = 0
-        result = voting_collection.insert_one(api.payload)
+        voting["currentVotes"] = 0
+
+        result = voting_collection.insert_one(voting)
         voting = voting_collection.find_one({"_id": result.inserted_id})
+
         return voting, 201
 
 
 def get_voting_or_404(voting_id):
     voting = voting_collection.find_one({"_id": ObjectId(voting_id)})
+
     if not voting:
         api.abort(404, f"Voting {voting_id} not found.")
+
     return voting
 
 
 @api.route("/<voting_id>")
-class Voting(Resource):
+class VotingDetail(Resource):
     @api.marshal_with(voting_fields)
     def get(self, voting_id):
         return get_voting_or_404(voting_id)
@@ -66,20 +73,21 @@ class Voting(Resource):
 class ChoiceActionList(Resource):
     @api.expect(choice_action_fields)
     def post(self, voting_id, choice_id):
-        action_type = api.payload["type"]
+        action = api.payload
+        action_type = action["type"]
 
         if action_type not in CHOICE_ACTION_TYPES:
             api.abort(400, "Action type not supported.")
 
         voting = get_voting_or_404(voting_id)
 
-        end_datetime = voting.get("endDateTime", None)
-        max_votes = voting.get("maxVotes", None)
+        end_datetime = voting.get("endDateTime")
+        max_votes = voting.get("maxVotes")
 
-        end_datetime = dateutil.parser.parse(end_datetime) \
-            if end_datetime else None
+        if end_datetime:
+            end_datetime = dateutil.parser.parse(end_datetime)
 
-        if end_datetime and end_datetime >= datetime.now(timezone.utc) or \
+        if end_datetime and datetime.now(timezone.utc) >= end_datetime or \
                 max_votes and voting["currentVotes"] >= max_votes:
             api.abort(403, "The voting is closed!")
 
@@ -94,6 +102,11 @@ class ChoiceActionList(Resource):
         if action_type == "vote":
             selected_choice["votes"] += 1
             voting["currentVotes"] += 1
+        elif action_type == "cancelVote":
+            if selected_choice["votes"] == 0:
+                api.abort(400, "The choice already has zero votes.")
+            selected_choice["votes"] -= 1
+            voting["currentVotes"] -= 1
 
         result = voting_collection.replace_one(
             {"_id": ObjectId(voting_id)},
